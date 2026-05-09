@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Portafolio Esfera</title>
     <style>
-        body { margin: 0; overflow: hidden; background-color: #000; font-family: 'Segoe UI', sans-serif; color: white; }
+        body { margin: 0; overflow: hidden; background-color: #000; font-family: 'Segoe UI', sans-serif; color: white; touch-action: none; }
         #canvas-container { width: 100vw; height: 100vh; }
         
         #portfolio-header {
@@ -30,17 +30,20 @@
             z-index: 5; pointer-events: none; mix-blend-mode: difference;
         }
 
-        #ui-hint {
+        #close-focus-btn {
             position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
-            background: rgba(255,255,255,0.1); padding: 10px 20px; border-radius: 20px;
-            border: 1px solid rgba(255,255,255,0.3); font-size: 12px; letter-spacing: 1px; 
-            backdrop-filter: blur(5px); display: none; z-index: 10;
+            background: rgba(255,255,255,0.1); padding: 12px 24px; border-radius: 30px;
+            border: 1px solid rgba(255,255,255,0.4); font-size: 12px; letter-spacing: 1px; 
+            backdrop-filter: blur(5px); display: none; z-index: 10; cursor: pointer; 
+            color: white; transition: 0.3s;
         }
+        #close-focus-btn:hover { background: rgba(255,255,255,0.3); }
 
         #instructions {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             background: rgba(0,0,0,0.8); display: flex; flex-direction: column;
             justify-content: center; align-items: center; cursor: pointer; z-index: 20;
+            text-align: center;
         }
 
         #pause-upload-btn {
@@ -59,9 +62,11 @@
             <input type="file" id="file-input" multiple accept="image/*" style="display: none;">
         </div>
     </div>
+    
     <div id="crosshair"></div>
-    <div id="ui-hint">PRESIONA [ X ] PARA SALIR DEL ENFOQUE</div>
+    <button id="close-focus-btn">CERRAR ENFOQUE [ X ]</button>
     <div id="canvas-container"></div>
+    
     <div id="instructions">
         <h2 style="font-weight: normal; margin-bottom: 10px;">ENTRAR AL PORTAFOLIO</h2>
         <p style="color:#888; margin-bottom: 20px;">[WASD] Mover | [Apuntar] Destacar | [Click] Enfocar | [ESC] Pausa</p>
@@ -80,6 +85,7 @@
     <script type="module">
         import * as THREE from 'three';
         import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
         let scene, camera, renderer, controls;
         let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false;
@@ -94,11 +100,13 @@
         let hoveredObject = null;
         let isFocused = false;
         let focusTarget = null;
-        const uiHint = document.getElementById('ui-hint');
-
+        
+        const closeFocusBtn = document.getElementById('close-focus-btn');
         const globeRadius = 35;
         
-        // Imágenes iniciales por defecto
+        // Detección de celular
+        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+
         let imageUrls = [
             'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=400&q=75',
             'https://images.unsplash.com/photo-1521119989659-a83eee488004?w=400&q=75',
@@ -121,41 +129,58 @@
             renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
             document.getElementById('canvas-container').appendChild(renderer.domElement);
 
-            controls = new PointerLockControls(camera, document.body);
             const instructions = document.getElementById('instructions');
-            
-            instructions.addEventListener('click', () => {
-                if(!isFocused) controls.lock();
-            });
-            controls.addEventListener('lock', () => instructions.style.display = 'none');
-            controls.addEventListener('unlock', () => { if(!isFocused) instructions.style.display = 'flex'; });
-            scene.add(controls.getObject());
 
-            // Listeners para subida de archivos
+            // --- CONFIGURACIÓN CONDICIONAL (MÓVIL VS ESCRITORIO) ---
+            if (isMobile) {
+                // Controles Táctiles
+                controls = new OrbitControls(camera, renderer.domElement);
+                controls.enableDamping = true;
+                controls.dampingFactor = 0.05;
+                controls.enablePan = false; 
+                controls.minDistance = 40; 
+                controls.maxDistance = 150;
+
+                // Adaptar Interfaz
+                document.querySelector('#instructions p').innerText = "[Desliza] Rotar | [Pellizca] Zoom | [Toca] Enfocar";
+                document.getElementById('crosshair').style.display = 'none';
+
+                instructions.addEventListener('click', () => { instructions.style.display = 'none'; });
+            } else {
+                // Controles de Computadora
+                controls = new PointerLockControls(camera, document.body);
+                instructions.addEventListener('click', () => { if(!isFocused) controls.lock(); });
+                controls.addEventListener('lock', () => instructions.style.display = 'none');
+                controls.addEventListener('unlock', () => { if(!isFocused) instructions.style.display = 'flex'; });
+                scene.add(controls.getObject());
+            }
+
+            // Listeners Generales
             const uploadBtn = document.getElementById('upload-btn');
             const pauseUploadBtn = document.getElementById('pause-upload-btn');
             const fileInput = document.getElementById('file-input');
 
             uploadBtn.addEventListener('click', (e) => { e.stopPropagation(); fileInput.click(); });
             pauseUploadBtn.addEventListener('click', (e) => { e.stopPropagation(); fileInput.click(); });
+            closeFocusBtn.addEventListener('click', (e) => { e.stopPropagation(); exitFocus(); });
 
             fileInput.addEventListener('change', handleFileUpload);
 
             document.addEventListener('keydown', (e) => {
-                onKeyDown(e);
+                if (!isMobile) onKeyDown(e);
                 if(e.code === 'KeyX' && isFocused) exitFocus();
             });
-            document.addEventListener('keyup', onKeyUp);
-            document.addEventListener('mousedown', onMouseClick);
+            if (!isMobile) document.addEventListener('keyup', onKeyUp);
+            
+            // Reemplazo del mousedown por click para funcionar en touch y desktop
+            document.addEventListener('click', onGlobalClick);
 
             createGlobe(imageUrls);
-
             window.addEventListener('resize', onWindowResize);
         }
 
         function createGlobe(urls) {
             if(globeGroup) scene.remove(globeGroup);
-            
             globeGroup = new THREE.Group();
             const textureLoader = new THREE.TextureLoader();
             const loadedTextures = urls.map(url => textureLoader.load(url));
@@ -163,19 +188,14 @@
 
             let globalIndex = 0; 
             const numRows = 12;
-            const baseCols = 28; // Columnas en el ecuador
+            const baseCols = 28;
 
             for (let i = 0; i < numRows; i++) {
-                // Latitud
                 const phi = ((i + 1) / (numRows + 1)) * Math.PI;
-                
-                // Reducción armónica en los polos
                 const currentCols = Math.max(6, Math.round(baseCols * Math.sin(phi)));
 
                 for (let j = 0; j < currentCols; j++) {
-                    // Longitud
                     const theta = (j / currentCols) * 2 * Math.PI;
-                    
                     const x = globeRadius * Math.sin(phi) * Math.cos(theta);
                     const y = globeRadius * Math.cos(phi);
                     const z = globeRadius * Math.sin(phi) * Math.sin(theta);
@@ -219,28 +239,52 @@
                 meshIndex++;
             });
 
-            setTimeout(() => controls.lock(), 500); 
+            if(!isMobile) setTimeout(() => controls.lock(), 500); 
         }
 
-        function onMouseClick() {
-            if (!controls.isLocked || isFocused) return;
-            
-            if (hoveredObject) {
-                isFocused = true;
-                focusTarget = hoveredObject;
-                controls.unlock(); 
-                uiHint.style.display = 'block';
+        function onGlobalClick(e) {
+            // Evitar que detecte clics en la interfaz (botones)
+            if (e.target.tagName.toLowerCase() === 'button' || e.target.tagName.toLowerCase() === 'a') return;
+            if (isFocused) return;
 
-                globeGroup.children.forEach(mesh => {
-                    mesh.material.opacity = (mesh === focusTarget) ? 1 : 0.4;
-                });
+            if (isMobile) {
+                // Raycast desde donde el usuario tocó la pantalla
+                const mouse = new THREE.Vector2();
+                mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+                mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+                
+                raycaster.setFromCamera(mouse, camera);
+                const intersects = raycaster.intersectObjects(globeGroup.children);
+
+                if (intersects.length > 0) {
+                    focusTarget = intersects[0].object;
+                    isFocused = true;
+                    closeFocusBtn.style.display = 'block';
+
+                    globeGroup.children.forEach(mesh => {
+                        mesh.material.opacity = (mesh === focusTarget) ? 1 : 0.4;
+                    });
+                }
+            } else {
+                // Escritorio: Solo funciona si el mouse está bloqueado
+                if (!controls.isLocked) return;
+                if (hoveredObject) {
+                    isFocused = true;
+                    focusTarget = hoveredObject;
+                    controls.unlock(); 
+                    closeFocusBtn.style.display = 'block';
+
+                    globeGroup.children.forEach(mesh => {
+                        mesh.material.opacity = (mesh === focusTarget) ? 1 : 0.4;
+                    });
+                }
             }
         }
 
         function exitFocus() {
             isFocused = false;
             focusTarget = null;
-            uiHint.style.display = 'none';
+            closeFocusBtn.style.display = 'none';
             
             if (hoveredObject) {
                 hoveredObject.position.copy(hoveredObject.userData.originalPos);
@@ -249,7 +293,7 @@
             }
             
             globeGroup.children.forEach(mesh => mesh.material.opacity = 1);
-            controls.lock();
+            if (!isMobile) controls.lock();
         }
 
         function onKeyDown(e) {
@@ -283,8 +327,8 @@
 
             globeGroup.rotation.y += 0.0005;
 
-            // Hover (Destacar)
-            if (controls.isLocked && !isFocused) {
+            // Hover solo en escritorio
+            if (!isMobile && controls.isLocked && !isFocused) {
                 raycaster.setFromCamera(crosshairPoint, camera);
                 const intersects = raycaster.intersectObjects(globeGroup.children);
 
@@ -312,8 +356,10 @@
                 }
             }
 
-            // Enfoque / Movimiento
+            // Enfoque
             if (isFocused && focusTarget) {
+                if (isMobile) controls.enabled = false; // Detener órbitas mientras se enfoca
+
                 const targetWorldPos = new THREE.Vector3();
                 focusTarget.getWorldPosition(targetWorldPos);
 
@@ -323,22 +369,27 @@
                 camera.position.lerp(idealCamPos, 0.08);
                 camera.lookAt(targetWorldPos);
 
-            } else if (controls.isLocked) {
-                velocity.x -= velocity.x * 10.0 * delta;
-                velocity.z -= velocity.z * 10.0 * delta;
+            } else {
+                if (isMobile) {
+                    controls.enabled = true;
+                    controls.update(); // Necesario para la fricción suave (damping)
+                } else if (controls.isLocked) {
+                    velocity.x -= velocity.x * 10.0 * delta;
+                    velocity.z -= velocity.z * 10.0 * delta;
 
-                direction.z = Number(moveForward) - Number(moveBackward);
-                direction.x = Number(moveRight) - Number(moveLeft);
-                direction.normalize();
+                    direction.z = Number(moveForward) - Number(moveBackward);
+                    direction.x = Number(moveRight) - Number(moveLeft);
+                    direction.normalize();
 
-                if (moveForward || moveBackward) velocity.z -= direction.z * 180.0 * delta;
-                if (moveLeft || moveRight) velocity.x -= direction.x * 180.0 * delta;
+                    if (moveForward || moveBackward) velocity.z -= direction.z * 180.0 * delta;
+                    if (moveLeft || moveRight) velocity.x -= direction.x * 180.0 * delta;
 
-                controls.moveRight(-velocity.x * delta);
-                controls.moveForward(-velocity.z * delta);
+                    controls.moveRight(-velocity.x * delta);
+                    controls.moveForward(-velocity.z * delta);
 
-                const dist = camera.position.length();
-                if(dist < 40 || dist > 150) velocity.set(0,0,0);
+                    const dist = camera.position.length();
+                    if(dist < 40 || dist > 150) velocity.set(0,0,0);
+                }
             }
 
             prevTime = time;
